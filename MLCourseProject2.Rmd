@@ -1,0 +1,158 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Jakub Wiatrak"
+date: "21 September 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:\\Users\\jakub.wiatrak\\Desktop\\osobiste\\Data Science\\8. Machine Learning\\Week 4 -\\course project")
+```
+
+
+## Introduction
+
+The goal of this project is to predict the manner in which participants did a barbell lift excercise - to detect proper and improper methods of doing the excercise. The data has been gathered with devices, such as _Fitbit_ or _Fuelband_.
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+
+## Loading required packages
+
+``` {r, message=FALSE}
+library(caret)
+library(data.table)
+library(rattle)
+```
+
+## Reading and preparing data
+
+The training data is fairly large, so we will use _fread_ function from _data.table_ package. Next, we will clean the data, followed by splitting training set into training and validation set for cross-validation
+
+``` {r}
+data <- fread("pml-training.csv")
+data <- as.data.frame(data)
+
+testing <- fread("pml-testing.csv")
+testing <- as.data.frame(testing)
+
+#Clean the data of variables with near zero variance
+nzv <- nearZeroVar(data)
+data.clean <- data[,-nzv]
+testing <- testing[,-nzv]
+
+#next, we will remove variables with NA values
+NA_amount <- sapply(data.clean, function(x) {sum(is.na(x))/length(x)})
+data.clean <- data.clean[,NA_amount < 0.2]
+testing <- testing[,NA_amount < 0.2]
+
+#finally, we will remove variables, that seem unreasonable to use in prediction,
+#like timestamp and username
+data.clean <- data.clean[,-(1:6)]
+testing <- testing[,-(1:6)]
+
+#next, we will split the training data into further training and test set
+set.seed(2137)
+inTrain <- createDataPartition(y=data.clean$classe,
+                               p=0.7, list = F)
+
+training <- data.clean[inTrain,]
+validation <- data.clean[-inTrain,]
+
+```
+
+## Training Machine Learning Algorithms
+
+We will train a few algorithms on the training data. Then we will perform a cross-validation, and choose the best model. We will use:
+
+
+- decicion tree ( _rpart_)
+- gradient boosting ( _gbm_)
+- random forest ( _rf_)
+
+
+```{r}
+#decision tree
+fit_tree <- train(classe ~ ., data = training, method = "rpart")
+fancyRpartPlot(fit_tree$finalModel)
+```
+
+```{r include=FALSE}
+load('fit_gbm')
+```
+
+```{r eval = FALSE}
+#gradient boosting
+fit_gbm <- train(classe ~ ., data = training, method = "gbm")
+
+```
+
+```{r}
+fit_gbm
+```
+
+
+```{r include=FALSE}
+load('fit_rf')
+```
+
+```{r eval=FALSE}
+#random forest
+
+#using parallel processing to shorten the time of fitting random forest algorithm
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+
+fit_rf <- train(classe ~ ., data = training, method = "rf", trControl = fitControl)
+
+stopCluster(cluster)
+registerDoSEQ()
+
+```
+
+```{r}
+fit_rf
+```
+
+## Cross-validation
+
+Now we will use the validation subset in order to correctly evaluate the accuracy of each model and choose the best one for prediction.
+
+```{r}
+#cross-validation of decision tree
+pred_tree <- predict(fit_tree, validation)
+confusionMatrix(pred_tree, as.factor(validation$classe))$overall[1]
+
+```
+
+```{r}
+#cross-validation of gradient boosting
+pred_gbm <- predict(fit_gbm, validation)
+confusionMatrix(pred_gbm, as.factor(validation$classe))$overall[1]
+
+```
+```{r}
+#cross-validation of random forest
+pred_rf <- predict(fit_rf, validation)
+confusionMatrix(pred_rf, as.factor(validation$classe))$overall[1]
+```
+
+Random forest is clearly the most accurate algorithm for predicting the _classe_ variable.
+
+## Prediction
+
+Let's use the best created algorithm - random forest - for predicting the final 20 observations.
+
+```{r}
+test_prediction <- predict(fit_rf, testing)
+test_prediction
+```
+
+
